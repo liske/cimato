@@ -1,0 +1,7 @@
+cimato
+======
+
+cimato (Cisco IOS MAC Address Table Observer) monitors the MAC address
+table of cisco switches on different VLANs. The results can be filtered
+by MAC, IP (if an arp table entry is available) and reported using
+configurable hooks.
