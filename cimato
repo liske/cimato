@@ -1,0 +1,60 @@
+#!/usr/bin/perl
+
+# cimato - Cisco IOS MAC Address table observer
+#
+# Author:
+#   Thomas Liske <liske@ibh.de>
+#
+# Copyright Holder:
+#   2011 (C) IBH IT-Service GmbH [http://www.ibh.de/]
+#
+# License:
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 2 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this package; if not, write to the Free Software
+#   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+#
+
+use strict;
+use warnings;
+use Net::SNMP;
+use Getopt::Std;
+
+my $baseoid = '.1.3.6.1.2.1.17.4.3.1.1';
+
+# getopt module config
+$Getopt::Std::STANDARD_HELP_VERSION = 1;
+
+# parse cmd opts
+my %opts;
+getopts('c:', \%opts);
+
+sub HELP_MESSAGE {
+    VERSION_MESSAGE();
+
+    print <<EOHELP;
+
+    --help      shows this message
+    --version   shows version information
+
+    -c          config file
+
+EOHELP
+
+}
+
+sub VERSION_MESSAGE {
+    print <<EOVM;
+cimato 0.1
+Copyright 2011, IBH IT-Service GmbH [http://www.ibh.de/] - Thomas Liske <liske\@ibh.de>
+EOVM
+}
