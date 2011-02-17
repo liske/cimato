@@ -28,15 +28,112 @@ use strict;
 use warnings;
 use Net::SNMP;
 use Getopt::Std;
+use DBI;
 
-my $baseoid = '.1.3.6.1.2.1.17.4.3.1.1';
+use constant {
+    OID_VTPVLANINDEX => '1.3.6.1.4.1.9.9.46.1.3.1.1.1',
+    OID_VTPVLANSTATE => '1.3.6.1.4.1.9.9.46.1.3.1.2',
+    OID_VTPVLANTYPE => '1.3.6.1.4.1.9.9.46.1.3.1.3',
+    OID_VTPVLANNAME => '1.3.6.1.4.1.9.9.46.1.3.1.1.4.1',
+    OID_DOT1DTPFDBADDRESS => '1.3.6.1.2.1.17.4.3.1.1',
+};
 
 # getopt module config
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
 
 # parse cmd opts
 my %opts;
-getopts('c:', \%opts);
+$opts{'c'} = '/etc/cimato/cimato.conf';
+getopts('vc:', \%opts);
+
+#default config
+my %config_db;
+eval `cat "$opts{'c'}"`;
+
+my $verbose = exists($opts{'v'});
+$|++ if($verbose);
+
+my %gmacs;
+
+# db connect
+my $dbh = DBI->connect($config_db{'dsn'}, $config_db{'username'}, $config_db{'passwd'});
+my $devs = $dbh->selectall_hashref('SELECT id, name, host, community FROM devs', 'id');
+foreach my $dev (keys %{$devs}) {
+    print "* $devs->{$dev}->{name}\n" if ($verbose);
+
+    my ($snmp, $error) = Net::SNMP->session(
+	-hostname => $devs->{$dev}->{'host'},
+	-community => $devs->{$dev}->{'community'},
+	-version => 'snmpv2c',
+    );
+
+    unless(defined($snmp)) {
+	print STDERR "ERROR(session): $error\n";
+	next;
+    }
+
+    my ($bindings) = $snmp->get_table(OID_VTPVLANNAME);
+    unless(defined($bindings)) {
+	print STDERR "ERROR(get_bulk_request): ".$snmp->error()."\n";
+	$snmp->close();
+	next;
+    }
+    $snmp->close();
+
+    my %vlan_names;
+    my $sth = $dbh->prepare('INSERT INTO vlans (id, name) VALUES (?, ?) ON DUPLICATE KEY UPDATE lseen = CURRENT_TIMESTAMP');
+    foreach my $oid (keys %{$bindings}) {
+	if(substr($oid, 0, length(OID_VTPVLANNAME)) eq OID_VTPVLANNAME) {
+	    my $vlan_id = substr($oid, length(OID_VTPVLANNAME)+1);
+
+	    $vlan_names{$vlan_id} = $bindings->{$oid};
+	    $sth->execute($vlan_id, $bindings->{$oid});
+	}
+    }
+
+    foreach my $vlan_id (sort {$a <=> $b} keys %vlan_names) {
+	printf STDERR " %4d: ", $vlan_id if($verbose);
+
+	my ($snmp, $error) = Net::SNMP->session(
+	    -hostname => $devs->{$dev}->{'host'},
+	    -community => $devs->{$dev}->{'community'}.'@'.$vlan_id,
+	    -version => 'snmpv2c',
+	);
+
+	unless(defined($snmp)) {
+	    print STDERR "ERROR(session\@$vlan_id): $error\n";
+	    next;
+	}
+
+	my ($bindings) = $snmp->get_table(OID_DOT1DTPFDBADDRESS);
+	unless(defined($bindings)) {
+	    printf STDERR "-\n" if($verbose);
+	    $snmp->close();
+	    next;
+	}
+	$snmp->close();
+
+	my %macs;
+	my $sth = $dbh->prepare('INSERT INTO mat (vlan, mac, fdev) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE lseenb = lseen, lseen = CURRENT_TIMESTAMP, ldevb = ldev, ldev = VALUES(fdev)');
+	foreach my $mac (values %{$bindings}) {
+	    $mac = uc(substr($mac, 2));
+
+	    if(exists($gmacs{$mac})) {
+		print STDERR '.' if($verbose);
+	    }
+	    else {
+		print STDERR '+' if($verbose);
+		$sth->execute($vlan_id, $mac, $dev);
+	    }
+
+	    $gmacs{$mac}++;
+	}
+
+	printf STDERR "\n" if($verbose);
+    }
+
+    printf STDERR "\n" if($verbose);
+}
 
 sub HELP_MESSAGE {
     VERSION_MESSAGE();
@@ -47,6 +144,7 @@ sub HELP_MESSAGE {
     --version   shows version information
 
     -c          config file
+    -v          be verbose
 
 EOHELP
 
